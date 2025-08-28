@@ -1,21 +1,24 @@
 name: Test Cert YAML (dev/test Azure)
 
 on:
-  workflow_dispatch: 
-
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/cert-yaml    
+ 
 jobs:
   test-dev:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository content
+        uses: actions/checkout@v4
 
-      - name: Azure login (dev/test)
-        uses: azure/login@v1
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+      - name: Azure Login (with service principal credentials)
+        run: |
+          az login --service-principal \
+            --username "${{ secrets.AZURE_CLIENT_ID }}" \
+            --password "${{ secrets.AZURE_CLIENT_SECRET }}" \
+            --tenant "${{ secrets.AZURE_TENANT_ID }}" 
 
       - name: Run action against dev/test
         uses: ./.   # points to action.yml in repo root
