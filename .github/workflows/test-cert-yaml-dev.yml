@@ -1,7 +1,7 @@
 name: Test Cert YAML (dev/test Azure)
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch: 
 
 jobs:
   test-dev:
