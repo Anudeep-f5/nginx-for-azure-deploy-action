@@ -1,0 +1,31 @@
+name: Test Cert YAML (dev/test Azure)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  test-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (dev/test)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Run action against dev/test
+        uses: ./.   # points to action.yml in repo root
+        with:
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          resource-group-name: ${{ secrets.AZURE_RG_NAME }}
+          nginx-deployment-name: ${{ secrets.AZURE_NGINX_DEPLOYMENT_NAME }}
+          debug: "true"
+          nginx-certificates-yaml: |
+            - nginx_cert_name: dev-cert-1
+              keyvault_secret: ${{ secrets.AZ_DEV_KV_SECRET_ID }}
+              certificate_virtual_path: /etc/nginx/certs/dev1.crt
+              key_virtual_path: /etc/nginx/certs/dev1.key
