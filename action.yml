@@ -26,8 +26,19 @@ inputs:
       If your NGINX configuration files use absolute paths in "include" directives, this setting ensures those paths are correctly mapped in the deployment by prepending the specified directory.'
     required: false
     default: ""
-  nginx-certificates:
-    description: 'An array of JSON objects each with keys nginx_cert_name, keyvault_secret, certificate_virtual_path and key_virtual_path. Example: [{"certificateName": "server1", "keyvaultSecret": "https://...", "certificateVirtualPath": "/etc/nginx/certs/server1.crt", "keyVirtualPath": "/etc/nginx/certs/server1.key"  }, {"name": "server2", "keyvaultSecret": "https://...", "certificateVirtualPath": "/etc/nginx/certs/server2.crt", "keyVirtualPath": "/etc/nginx/certs/server2.key"  }] '
+  nginx-certificates-yaml:
+    description: > 
+      YAML array of certificate objects. Each item requires: 
+      nginx_cert_name, keyvault_secret, certificate_virtual_path, key_virtual_path.
+      Example: 
+        - nginx_cert_name: server1
+          keyvault_secret: https://...
+          certificate_virtual_path: /etc/nginx/certs/server1.crt
+          key_virtual_path: /etc/nginx/certs/server1.key
+        - nginx_cert_name: server 2
+          keyvault_secret: https://...
+          certificate_virtual_path: /etc/nginx/certs/server2.crt
+          key_virtual_path: /etc/nginx/certs/server2.key  
     required: false
   protected-files:
     description: "Comma-separated list of file paths relative to nginx-config-directory-path that should be marked as protected. Example: 'ssl/private.key,conf.d/secrets.conf'"
@@ -40,11 +51,67 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: "Synchronize NGINX certificate(s) from the Git repository to an NGINXaaS for Azure deployment"
-      run: ${{github.action_path}}/src/deploy-certificate.sh --subscription-id=${{ inputs.subscription-id }} --resource-group-name=${{ inputs.resource-group-name }} --nginx-deployment-name=${{ inputs.nginx-deployment-name }} --certificates=${{ toJSON(inputs.nginx-certificates) }} --debug=${{ inputs.debug }}
-      if: ${{ inputs.nginx-certificates != '' }}
+    # prepare certificate input : prefer YAML, fallback to JSON
+    - name: prepare certificate input (YAML->JSON if needed)
+      id: prep-certs
       shell: bash
+      run: |
+        set -euo pipefail
+        CERT_JSON=""
+        if [[ -n "${{ inputs.nginx-certificates-yaml }}"]]; then
+           # write YAML to temp file
+           yaml_file="$(mktemp)"
+           printf "%s\n" "${{ inputs.nginx-certificates-yaml }}" > "$yaml_file"
+
+           # install yq if missing and convert to JSON
+           if ! command -v yq > /dev/null 2>&1; then 
+             sudo wget -qO /usr/local/bin/yq \
+               https://github.com/mikefarah/yq/releases/donwload/v4.44.3/yq_linux_amd64
+             sudo chmod +x /usr/local/bin/yq
+           fi 
+           CERT_JSON="$(yq -o=json '.' "$yaml_file")"
+        elif [[ -n "${{ inputs.nginx-certificates }}"]]; then 
+          # backward compatible path: already JSON
+          CERT_JSON="${{ inputs.nginx-certificates }}"
+        fi 
+        {
+          echo "cert_json<<EOF"
+          echo "$CERT_JSON"
+          echo "EOF"
+        } >> "GITHUB_OUTPUT"  
+
+    - name: "Synchronize NGINX certificate(s) from the Git repository to an NGINXaaS for Azure deployment"
+      if: steps.prep-certs.outputs.cert_json != ''
+      shell: bash 
+      run: |
+        set -euo pipefail
+        # jq is typically present on ubuntu-latest, but ensure it 
+        if ! command -v jq > /dev/null 2>&1; then 
+          sudo apt-get update -y 
+          sudo apt-get install -y jq
+        fi 
+        "${{ github.action.path }}/src/deploy-certificate.sh" \
+        --subscription-id="${{ inputs.subscription-id }}" \
+        --resource-group-name="${{ inputs.resource-group-name }}" \
+        --nginx-deployment-name="${{ inputs.nginx-deployment-name }}" \
+        --certificates='${{ steps.prep-certs.outputs.cert_json }}' \
+        --debug=${{ inputs.debug }}
+
+
     - name: "Synchronize NGINX configuration from the Git repository to an NGINXaaS for Azure deployment"
-      run: ${{github.action_path}}/src/deploy-config.sh --subscription-id=${{ inputs.subscription-id }} --resource-group-name=${{ inputs.resource-group-name }} --nginx-deployment-name=${{ inputs.nginx-deployment-name }} --nginx-config-directory-path=${{ inputs.nginx-config-directory-path }} --nginx-root-config-file=${{ inputs.nginx-root-config-file }} --transformed-nginx-config-directory-path=${{ inputs.transformed-nginx-config-directory-path }} --protected-files=${{ inputs.protected-files }} --debug=${{ inputs.debug }}
       if: ${{ inputs.nginx-config-directory-path != '' }}
       shell: bash
+      run: | 
+        "${{ github.action_path }}/src/deploy-config.sh" \
+        --subscription-id="${{ inputs.subscription-id }}" \
+        --resource-group-name="${{ inputs.resource-group-name }}" \
+        --nginx-deployment-name="${{ inputs.nginx-deployment-name }}" \
+        --nginx-config-directory-path='${{ inputs.nginx-config-directory-path }}' \
+        --nginx-root-config-file='${{ inputs.nginx-root-config-file }}' \
+        --transformed-nginx-config-directory-path='${{ inputs.transformed-nginx-config-directory-path }}' \
+        --protected-files=='${{ inputs.protected-files }}' \
+        --debug=${{ inputs.debug }}
+        
+
+
+
