@@ -37,14 +37,48 @@ inputs:
     description: "Enable/Disable debug output."
     required: false
     default: "false"
+
+  dry-run:
+   description: "Validate NGINX config only (nginx -t), skip deploy."
+   required: false
+   default: "false"
+  dry-run-artifact-name:
+   description: "Artifact name for nginx -t output."
+   required: false
+   default: "nginx-config-dry-run"
+
+  #outputs:
+   # dry-run-exit-code:
+    #  description: " Exit code from nginx-t (0=ok)."
+    #  value: ${{ steps.dry-run.outputs.exit-code }}
 runs:
   using: "composite"
   steps:
+    - name: "Validate NGINX config (dry-run)"
+      id: nginx_dry_run
+      if: ${{ inputs.dry-run == 'true' }}
+      shell: bash
+      run: |
+        set +e
+        CONF_DIR="${{ inputs.nginx-config-directory-path != '' && inputs.nginx-config-directory-path || 'config/' }}"
+        ROOT_FILE="${{ inputs.nginx-root-config-file != '' && inputs.nginx-root-config-file || 'nginx.conf' }}"
+        REPORT="${GITHUB_WORKSPACE}/nginx_dry_run_report.txt"
+        sudo apt-get update -y >/dev/null
+        sudo apt-get install -y nginx >/dev/null
+        sudo rm -f /etc/nginx/nginx.conf
+        sudo cp -r "${CONF_DIR}/" /etc/nginx/
+        { sudo nginx -t -c "/etc/nginx/${ROOT_FILE}"; CODE=$?; } 2>&1 | tee "${REPORT}"
+        echo "exit_code=${CODE}" >> "$GITHUB_OUTPUT"
+        echo "See artifact '${{ inputs.dry-run-artifact-name }}' for details." >> "$GITHUB_STEP_SUMMARY"
+        exit 0
+ 
+
     - name: "Synchronize NGINX certificate(s) from the Git repository to an NGINXaaS for Azure deployment"
+      if: ${{ inputs.dry-run != 'true' && inputs.nginx-certificates != '' }}
+      shell: bash
       run: ${{github.action_path}}/src/deploy-certificate.sh --subscription-id=${{ inputs.subscription-id }} --resource-group-name=${{ inputs.resource-group-name }} --nginx-deployment-name=${{ inputs.nginx-deployment-name }} --certificates=${{ toJSON(inputs.nginx-certificates) }} --debug=${{ inputs.debug }}
-      if: ${{ inputs.nginx-certificates != '' }}
-      shell: bash
+    
     - name: "Synchronize NGINX configuration from the Git repository to an NGINXaaS for Azure deployment"
-      run: ${{github.action_path}}/src/deploy-config.sh --subscription-id=${{ inputs.subscription-id }} --resource-group-name=${{ inputs.resource-group-name }} --nginx-deployment-name=${{ inputs.nginx-deployment-name }} --nginx-config-directory-path=${{ inputs.nginx-config-directory-path }} --nginx-root-config-file=${{ inputs.nginx-root-config-file }} --transformed-nginx-config-directory-path=${{ inputs.transformed-nginx-config-directory-path }} --protected-files=${{ inputs.protected-files }} --debug=${{ inputs.debug }}
-      if: ${{ inputs.nginx-config-directory-path != '' }}
+      if: ${{ inputs.dry-run != 'true' && inputs.nginx-config-directory-path != '' }} || ${{ inputs.nginx-root-config-file != '' }}
       shell: bash
+      run: ${{github.action_path}}/src/deploy-config.sh --subscription-id=${{ inputs.subscription-id }} --resource-group-name=${{ inputs.resource-group-name }} --nginx-deployment-name=${{ inputs.nginx-deployment-name }} --nginx-config-directory-path=${{ inputs.nginx-config-directory-path }} --nginx-root-config-file=${{ inputs.nginx-root-config-file }} --transformed-nginx-config-directory-path=${{ inputs.transformed-nginx-config-directory-path }} --protected-files=${{ inputs.protected-files }} --debug=${{ inputs.debug }}
