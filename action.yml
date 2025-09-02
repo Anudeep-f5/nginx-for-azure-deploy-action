@@ -47,10 +47,10 @@ inputs:
    required: false
    default: "nginx-config-dry-run"
 
-  outputs:
-    dry-run-exit-code:
-      description: " Exit code from nginx-t (0=ok)."
-      value: ${{ steps.dry-run.outputs.exit-code }}
+  #outputs:
+   # dry-run-exit-code:
+    #  description: " Exit code from nginx-t (0=ok)."
+    #  value: ${{ steps.dry-run.outputs.exit-code }}
 runs:
   using: "composite"
   steps:
